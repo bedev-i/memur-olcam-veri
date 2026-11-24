@@ -1,0 +1,52 @@
+name: İlanları topla
+
+on:
+  schedule:
+    - cron: "17 * * * *"     # saatte bir (UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: topla
+  cancel-in-progress: false
+
+jobs:
+  topla:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OCR araçları (Tesseract + Poppler)
+        shell: pwsh
+        run: |
+          choco install tesseract poppler -y --no-progress | Out-Null
+          $td = "C:\Program Files\Tesseract-OCR\tessdata"
+          Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata_fast/raw/main/tur.traineddata" -OutFile "$td\tur.traineddata"
+          "TESSERACT=C:\Program Files\Tesseract-OCR\tesseract.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $pp = Get-ChildItem C:\ProgramData\chocolatey\lib\poppler -Recurse -Filter pdftoppm.exe | Select-Object -First 1
+          if ($pp) { "PDFTOPPM=$($pp.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - name: Derle
+        shell: pwsh
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /optimize+ /codepage:65001 /out:toplayici.exe /r:System.Drawing.dll /r:System.Web.Extensions.dll /r:System.Core.dll toplayici\*.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Topla
+        shell: pwsh
+        run: .\toplayici.exe .
+
+      - name: Kaydet
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add veri
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { "Değişiklik yok"; exit 0 }
+          git commit -m "İlanlar güncellendi $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC"
+          git push
