@@ -38,6 +38,9 @@ jobs:
 
       - name: Topla
         shell: pwsh
+        env:
+          # Kariyer Kapısı ve kamuilan yurt dışı IP'lerine kapalı: bunları uygulama kullanıcının bilgisayarından çeker
+          KAYNAK_HARIC: "Kariyer Kapısı,Kamu İlan"
         run: .\toplayici.exe .
 
       - name: Kaydet

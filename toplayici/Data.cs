@@ -753,11 +753,14 @@ namespace KadroRadar
         public static Akis Topla(Akis onceki, Action<string> ilerleme)
         {
             var akis = new Akis { Guncelleme = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture) };
+            // KAYNAK_HARIC ortam degiskeni: GitHub toplayicisinda yurt disina kapali kaynaklari atlamak icin
+            var haric = new HashSet<string>((Environment.GetEnvironmentVariable("KAYNAK_HARIC") ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
             var adlar = new[] { "Kariyer Kapısı", "Kamu İlan", "Resmî Gazete", "İŞKUR", "ÖSYM" };
             var fn = new Func<Kaynak, Action<string>, List<Ilan>>[] { KariyerKapisiIlanlari, Kamu, ResmiGazete, Iskur, Osym };
             var tum = new List<Ilan>();
             for (int i = 0; i < fn.Length; i++)
             {
+                if (haric.Contains(adlar[i])) continue;
                 var st = new Kaynak { Ad = adlar[i] };
                 try { tum.AddRange(fn[i](st, ilerleme)); st.Tamam = true; }
                 catch (Exception ex)
@@ -767,6 +770,13 @@ namespace KadroRadar
                 }
                 akis.Kaynaklar.Add(st);
             }
+            Sonlandir(tum, onceki, akis);
+            return akis;
+        }
+
+        /// Ayni ilanlari birlestirir, ilk gorulme zamanlarini korur, akisa yazar.
+        static void Sonlandir(List<Ilan> tum, Akis onceki, Akis akis)
+        {
             // ilk gorulme zamanini koru
             var ilk = new Dictionary<string, string>();
             if (onceki != null) foreach (Ilan o in onceki.Ilanlar) ilk[o.Id] = o.IlkGorulme;
@@ -787,9 +797,71 @@ namespace KadroRadar
                 else it.IlkGorulme = simdi;
                 akis.Ilanlar.Add(it);
             }
+       }
+
+        // ------------------------------------------------------------ ortak akis (GitHub)
+
+        /// Ortak listeye, yurt disindan erisilemeyen kaynaklari (Kariyer Kapisi, kamuilan) bu bilgisayardan ekler.
+        static Akis Karistir(Akis ortak, Akis onceki, Action<string> ilerleme)
+        {
+            var akis = new Akis { Guncelleme = ortak.Guncelleme };
+            var yerelAd = new[] { "Kariyer Kapısı", "Kamu İlan" };
+            var yerelFn = new Func<Kaynak, Action<string>, List<Ilan>>[] { KariyerKapisiIlanlari, Kamu };
+            var tum = new List<Ilan>();
+            for (int i = 0; i < yerelFn.Length; i++)
+            {
+                var st = new Kaynak { Ad = yerelAd[i] };
+                try { tum.AddRange(yerelFn[i](st, ilerleme)); st.Tamam = true; }
+                catch (Exception ex)
+                {
+                    st.Bilgi = ShortErr(ex);
+                    // bu bilgisayardan da olmadiysa ortak listedeki (ya da onceki) kayitlari kullan
+                    bool var1 = false;
+                    foreach (Ilan o in ortak.Ilanlar) if (o.Kaynak == yerelAd[i]) { tum.Add(o); var1 = true; }
+                    if (!var1 && onceki != null) foreach (Ilan o in onceki.Ilanlar) if (o.Kaynak == yerelAd[i]) tum.Add(o);
+                }
+                akis.Kaynaklar.Add(st);
+            }
+            foreach (Ilan o in ortak.Ilanlar) if (Array.IndexOf(yerelAd, o.Kaynak) < 0) tum.Add(o);
+            foreach (Kaynak k in ortak.Kaynaklar) if (Array.IndexOf(yerelAd, k.Ad) < 0) akis.Kaynaklar.Add(k);
+            // ilk gorulme: once onceki yerel liste, sonra ortak listedeki deger
+            var birlesik = onceki ?? new Akis();
+            var ilk = new Akis { Ilanlar = new List<Ilan>(birlesik.Ilanlar) };
+            var ids = new HashSet<string>(); foreach (Ilan x in ilk.Ilanlar) ids.Add(x.Id);
+            foreach (Ilan x in ortak.Ilanlar) if (!ids.Contains(x.Id)) ilk.Ilanlar.Add(x);
+            Sonlandir(tum, ilk.Ilanlar.Count > 0 ? ilk : null, akis);
             return akis;
         }
 
+        public const string VarsayilanFeed = "https://raw.githubusercontent.com/bedev-i/memur-olcam-veri/main/veri/ilanlar.json";
+
+        /// Once ortak listeyi (GitHub'daki toplayicinin ciktisi) indirir; olmazsa ya da 12 saatten eskiyse kendisi toplar.
+        public static Akis Getir(Akis onceki, string feedUrl, Action<string> ilerleme, out bool ortak)
+        {
+            ortak = false;
+            string url = string.IsNullOrEmpty(feedUrl) ? VarsayilanFeed : feedUrl;
+            if (url != "-")
+            {
+                try
+                {
+                    if (ilerleme != null) ilerleme("Güncel ilan listesi indiriliyor...");
+                    var http = new Http { TimeoutMs = 20000 };
+                    string json = http.Get(url + (url.Contains("?") ? "&" : "?") + "t=" + DateTime.UtcNow.Ticks / TimeSpan.TicksPerMinute);
+                    Akis a = Json().Deserialize<Akis>(json);
+                    DateTime t;
+                    if (a != null && a.Ilanlar != null && a.Ilanlar.Count > 0 &&
+                        DateTime.TryParse(a.Guncelleme, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out t) &&
+                        (DateTime.UtcNow - t).TotalHours < 12)
+                    {
+                        ortak = true;
+                        return Karistir(a, onceki, ilerleme);
+                    }
+                }
+                catch { }
+            }
+            if (ilerleme != null) ilerleme("Ortak listeye ulaşılamadı, kaynaklar doğrudan okunuyor...");
+            return Topla(onceki, ilerleme);
+        }
         // ------------------------------------------------------------ akis dosyasi
 
         static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength = 64 << 20 }; }
