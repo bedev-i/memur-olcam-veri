@@ -847,7 +847,7 @@ namespace KadroRadar
                     if (ilerleme != null) ilerleme("Güncel ilan listesi indiriliyor...");
                     var http = new Http { TimeoutMs = 20000 };
                     string json = http.Get(url + (url.Contains("?") ? "&" : "?") + "t=" + DateTime.UtcNow.Ticks / TimeSpan.TicksPerMinute);
-                    Akis a = Json().Deserialize<Akis>(json);
+                    Akis a = Json().Deserialize<Akis>(json.TrimStart('\uFEFF'));
                     DateTime t;
                     if (a != null && a.Ilanlar != null && a.Ilanlar.Count > 0 &&
                         DateTime.TryParse(a.Guncelleme, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out t) &&
@@ -866,7 +866,7 @@ namespace KadroRadar
 
         static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength = 64 << 20 }; }
 
-        public static void Kaydet(Akis a) { try { File.WriteAllText(F("ilanlar.json"), Json().Serialize(a), Encoding.UTF8); } catch { } }
+        public static void Kaydet(Akis a) { try { File.WriteAllText(F("ilanlar.json"), Json().Serialize(a), new UTF8Encoding(false)); } catch { } }
 
         public static Akis Yukle()
         {
