@@ -775,7 +775,7 @@ namespace KadroRadar
         }
 
         /// Ayni ilanlari birlestirir, ilk gorulme zamanlarini korur, akisa yazar.
-        static void Sonlandir(List<Ilan> tum, Akis onceki, Akis akis)
+        static void Sonlandir(List<Ilan> tum, Akis onceki, Akis akis, bool ilkToplama = false)
         {
             // ilk gorulme zamanini koru
             var ilk = new Dictionary<string, string>();
@@ -788,7 +788,7 @@ namespace KadroRadar
                 if (!ids.Add(it.Id)) continue;
                 string t;
                 if (ilk.TryGetValue(it.Id, out t) && t.Length > 0) it.IlkGorulme = t;
-                else if (onceki == null)
+                else if (onceki == null || ilkToplama)
                 {
                     // ilk toplama: hepsi "yeni" gorunmesin; baslangic tarihi gecmisse onu, degilse 3 gun oncesini kullan
                     DateTime st0 = it.Start.HasValue && it.Start.Value <= DateTime.Today ? it.Start.Value : DateTime.UtcNow.AddDays(-3);
@@ -829,7 +829,7 @@ namespace KadroRadar
             var ilk = new Akis { Ilanlar = new List<Ilan>(birlesik.Ilanlar) };
             var ids = new HashSet<string>(); foreach (Ilan x in ilk.Ilanlar) ids.Add(x.Id);
             foreach (Ilan x in ortak.Ilanlar) if (!ids.Contains(x.Id)) ilk.Ilanlar.Add(x);
-            Sonlandir(tum, ilk.Ilanlar.Count > 0 ? ilk : null, akis);
+            Sonlandir(tum, ilk.Ilanlar.Count > 0 ? ilk : null, akis, onceki == null);
             return akis;
         }
 
